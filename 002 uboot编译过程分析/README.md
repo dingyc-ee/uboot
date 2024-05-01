@@ -208,3 +208,100 @@ LIBS += cpu/arm920t/s3c24x0/libs3c24x0.a
 LIBS += net/libnet.a
 ```
 
+4. elf文件
+
+```mk
+$(obj)u-boot:		depend version $(SUBDIRS) $(OBJS) $(LIBS) $(LDSCRIPT)
+		UNDEF_SYM=`$(OBJDUMP) -x $(LIBS) |sed  -n -e 's/.*\(__u_boot_cmd_.*\)/-u\1/p'|sort|uniq`;\
+		cd $(LNDIR) && $(LD) $(LDFLAGS) $$UNDEF_SYM $(__OBJS) \
+			--start-group $(__LIBS) --end-group $(PLATFORM_LIBS) \
+			-Map u-boot.map -o u-boot
+```
+
+展开就是以下内容：
+
+```mk
+UNDEF_SYM=`arm-linux-objdump -x lib_generic/libgeneric.a board/100ask24x0/lib100ask24x0.a cpu/arm920t/libarm920t.a cpu/arm920t/s3c24x0/libs3c24x0.a lib_arm/libarm.a fs/cramfs/libcramfs.a fs/fat/libfat.a fs/fdos/libfdos.a fs/jffs2/libjffs2.a fs/reiserfs/libreiserfs.a fs/ext2/libext2fs.a net/libnet.a disk/libdisk.a rtc/librtc.a dtt/libdtt.a drivers/libdrivers.a drivers/nand/libnand.a drivers/nand_legacy/libnand_legacy.a drivers/usb/libusb.a drivers/sk98lin/libsk98lin.a common/libcommon.a |sed  -n -e 's/.*\(__u_boot_cmd_.*\)/-u\1/p'|sort|uniq`;\
+	cd /home/ding/uboot/u-boot-1.1.6 && arm-linux-ld -Bstatic -T /home/ding/uboot/u-boot-1.1.6/board/100ask24x0/u-boot.lds -Ttext 0x33F80000  $UNDEF_SYM cpu/arm920t/start.o \
+		--start-group lib_generic/libgeneric.a board/100ask24x0/lib100ask24x0.a cpu/arm920t/libarm920t.a cpu/arm920t/s3c24x0/libs3c24x0.a lib_arm/libarm.a fs/cramfs/libcramfs.a fs/fat/libfat.a fs/fdos/libfdos.a fs/jffs2/libjffs2.a fs/reiserfs/libreiserfs.a fs/ext2/libext2fs.a net/libnet.a disk/libdisk.a rtc/librtc.a dtt/libdtt.a drivers/libdrivers.a drivers/nand/libnand.a drivers/nand_legacy/libnand_legacy.a drivers/usb/libusb.a drivers/sk98lin/libsk98lin.a common/libcommon.a --end-group  \
+		-Map u-boot.map -o u-boot
+```
+
+这些变量的值如下表：
+
++ $(OBJDUMP) : arm-linux-objdump
++ $(LIBS) : 
+	```
+	lib_generic/libgeneric.a
+	board/100ask24x0/lib100ask24x0.a
+	cpu/arm920t/libarm920t.a 
+	cpu/arm920t/s3c24x0/libs3c24x0.a 
+	lib_arm/libarm.a 
+	fs/cramfs/libcramfs.a 
+	fs/fat/libfat.a 
+	fs/fdos/libfdos.a 
+	fs/jffs2/libjffs2.a 
+	fs/reiserfs/libreiserfs.a 
+	fs/ext2/libext2fs.a 
+	net/libnet.a 
+	disk/libdisk.a 
+	rtc/librtc.a 
+	dtt/libdtt.a 
+	drivers/libdrivers.a 
+	drivers/nand/libnand.a 
+	drivers/nand_legacy/libnand_legacy.a 
+	drivers/usb/libusb.a 
+	drivers/sk98lin/libsk98lin.a 
+	common/libcommon.a
+	``` 
++ $(LNDIR) : /home/ding/uboot/u-boot-1.1.6
++ L$(DFLAGS ) : -Bstatic -T /home/ding/uboot/u-boot-1.1.6/board/100ask24x0/u-boot.lds -Ttext 0x33F80000
+	```
+	LDFLAGS += -Bstatic -T $(LDSCRIPT) -Ttext $(TEXT_BASE) $(PLATFORM_LDFLAGS)
+	```
++ $(OBJS) : 
+	```
+	cpu/arm920t/start.o
+	```
+
+链接脚本：board/100ask24x0/u-boot.lds
+
+```ld
+OUTPUT_FORMAT("elf32-littlearm", "elf32-littlearm", "elf32-littlearm")
+/*OUTPUT_FORMAT("elf32-arm", "elf32-arm", "elf32-arm")*/
+OUTPUT_ARCH(arm)
+ENTRY(_start)
+SECTIONS
+{
+	. = 0x00000000;
+
+	. = ALIGN(4);
+	.text      :
+	{
+	  cpu/arm920t/start.o	(.text)
+          board/100ask24x0/boot_init.o (.text)
+	  *(.text)
+	}
+
+	. = ALIGN(4);
+	.rodata : { *(.rodata) }
+
+	. = ALIGN(4);
+	.data : { *(.data) }
+
+	. = ALIGN(4);
+	.got : { *(.got) }
+
+	. = .;
+	__u_boot_cmd_start = .;
+	.u_boot_cmd : { *(.u_boot_cmd) }
+	__u_boot_cmd_end = .;
+
+	. = ALIGN(4);
+	__bss_start = .;
+	.bss : { *(.bss) }
+	_end = .;
+}
+```
+
+第一个运行的文件是start.o，第二个运行的文件是boot_init.o。
