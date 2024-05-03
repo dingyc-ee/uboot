@@ -84,9 +84,15 @@ reset:
 
 4. CPU初始化
 
-如果我们一开始是从Nor上运行的，那么_start的地址就是0，r0寄存器值为0。肯定跟r1寄存器不相等，那么就去执行`cpu_init_crit`函数。
+注意看，这里使用的是`adr r0, _start`，为什么不是ldr指令？原因是，_start标号其实是链接地址0x33f80000，怎么找到加载地址呢？
 
-而如果我们的代码是通过仿真器直接下载进去的，那么r0就跟r1相等，不需要在执行cpu初始化。
+需要使用adr指令，adr指令是位置无关码，使用的是相对地址。换言之，adr实际是加载地址，而不是链接地址。所以，`adr	r0, _start`相当于`r0 = 0`
+
+[内存与重定位——重定位的理论与代码实践（涉及位置有/无关码）](https://blog.csdn.net/oqqhutu12345678/article/details/70135880)
+
+[ARM汇编ADR和LDR指令的区别](https://blog.csdn.net/qq_33549208/article/details/134095383)
+
+[关于ARM中重定位：位置有关码和位置无关码及运行地址和链接地址](https://blog.csdn.net/yz_cfm/article/details/77099514)
 
 ```s
 #ifndef CONFIG_SKIP_LOWLEVEL_INIT
