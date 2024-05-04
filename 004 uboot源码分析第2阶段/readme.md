@@ -389,3 +389,212 @@ sbrk函数有以下注意事项：
 
 3. 在现代操作系统中，sbrk函数通常已被更高级别的内存分配接口替代，如malloc和free等
 
+## 初始化Nand并打印
+
+`include/config/100ask24x0.h`配置文件中，定义了CONFIG_COMMANDS，其中包括了CFG_CMD_NAND，所以会启动nand_init
+
+```c
+#define CONFIG_COMMANDS \
+                        ((CONFIG_CMD_DFL | \
+                        CFG_CMD_CACHE    | \
+                    /* Start: by www.100ask.net */ \
+                        CFG_CMD_PING     | \
+                        CFG_CMD_JFFS2    | \
+                        CFG_CMD_NAND     | \
+                    /* End: by www.100ask.net */ \
+                        /*CFG_CMD_EEPROM |*/ \
+                        /*CFG_CMD_I2C    |*/ \
+                        /*CFG_CMD_USB    |*/ \
+                        CFG_CMD_REGINFO  | \
+                        CFG_CMD_DATE     | \
+                        CFG_CMD_ELF))
+```
+
+```c
+#if (CONFIG_COMMANDS & CFG_CMD_NAND)
+	puts ("NAND:  ");
+	nand_init();		/* go init the NAND */
+#endif
+```
+
+初始化nand flash需要一些参数，这些参数在`include/config/100ask24x0.h`配置文件中指定。
+
+```c
+/*-----------------------------------------------------------------------
+ * NAND flash settings
+ */
+#define CFG_NAND_BASE           0
+#define CFG_MAX_NAND_DEVICE     1
+#define NAND_MAX_CHIPS          1
+```
+
+## 初始化环境变量
+
+初始化环境变量包括两个过程：
+
+1. 申请一块内存给env_ptr指针，内存块大小为配置文件中配置的大小
+2. env_relocate_spec函数，从存储介质中读出设置大小的内容，并保存在申请的内存中
+
+```c
+void env_relocate (void)
+{
+	DEBUGF ("%s[%d] offset = 0x%lx\n", __FUNCTION__,__LINE__,
+		gd->reloc_off);
+	/*
+	 * We must allocate a buffer for the environment
+	 */
+	env_ptr = (env_t *)malloc (CFG_ENV_SIZE);
+	DEBUGF ("%s[%d] malloced ENV at %p\n", __FUNCTION__,__LINE__,env_ptr);
+
+	env_relocate_spec ();
+	gd->env_addr = (ulong)&(env_ptr->data);
+}
+```
+
+## 进入主循环
+
+```c
+/* main_loop() can return to retry autoboot, if so just run it again. */
+for (;;) {
+    main_loop ();
+}
+```
+
+到此为止，uboot的第2阶段的准备工作就已经全部完成了，开始主循环。接下来让我们看看主循环都做了些什么
+
+### 定义bootdelay，读出内核
+
+我们在`100ask24x0.h`文件中定义：
+
+```c
+#define CONFIG_BOOTDELAY	2   // 2秒后进入boot加载内核
+```
+
+```c
+#if defined(CONFIG_BOOTDELAY) && (CONFIG_BOOTDELAY >= 0)
+	char *s;
+	int bootdelay;
+#endif
+```
+
+接下来从环境变量中读出保存的bootdelay字符串，并转为十进制数，保存在bootdelay变量中。
+
+如果bootdelay > 0就执行`abortboot`检测。如果2秒时间到了还没有检测到，就执行环境变量bootcmd的命令，启动内核！
+
+```c
+#if defined(CONFIG_BOOTDELAY) && (CONFIG_BOOTDELAY >= 0)
+	s = getenv ("bootdelay");
+	bootdelay = s ? (int)simple_strtol(s, NULL, 10) : CONFIG_BOOTDELAY;
+	debug ("### main_loop entered: bootdelay=%d\n\n", bootdelay);
+
+    s = getenv ("bootcmd");
+	debug ("### main_loop: bootcmd=\"%s\"\n", s ? s : "<UNDEFINED>");
+
+	if (bootdelay >= 0 && s && !abortboot (bootdelay)) {
+        {
+            printf("Booting Linux ...\n");            
+    	    run_command (s, 0);
+        }
+	}
+#endif	/* CONFIG_BOOTDELAY */
+```
+
+具体如何执行检测呢？ abortboot函数源码显示，如果读取到空格' '，就算检测成功。
+
+每隔10ms检测一次有没有按键输入，如果有就读取。如果是空格，就算检测成功。每秒打印一次剩余倒计时。
+
+```c
+static __inline__ int abortboot(int bootdelay)
+{
+	int abort = 0;
+
+	while ((bootdelay > 0) && (!abort)) {
+		int i;
+
+		--bootdelay;
+		/* delay 100 * 10ms */
+		for (i=0; !abort && i<100; ++i) {
+			if (tstc()) {	/* we got a key press	*/
+				/* consume input	*/
+				if (getc() == ' ') {
+					abort  = 1; /* don't auto boot	*/
+					bootdelay = 0;	/* no more delay	*/
+					break;
+				}
+			}
+			udelay (10000);
+		}
+
+		printf ("\b\b\b%2d ", bootdelay);
+	}
+
+	putc ('\n');
+
+	return abort;
+}
+```
+
+### 提前停止，进入uboot
+
+如果提前终止了加载内核，就先打印menu菜单，然后进入循环。这个循环的内容很简单，包括2个过程：
+
+1. `readline`打印命令提示符，然后读取输入
+2. 如果读取到输入，先保存在历史命令中，然后调用`run_command`执行命令
+
+```c
+run_command("menu", 0);
+/*
+    * Main Loop for Monitor Command Processing
+    */
+
+for (;;) {
+    len = readline (CFG_PROMPT);
+
+    flag = 0;	/* assume no special flags for now */
+    if (len > 0)
+        strcpy (lastcommand, console_buffer);
+
+    rc = run_command (lastcommand, flag);
+    if (rc <= 0) {
+        /* invalid command or not repeatable, forget it */
+        lastcommand[0] = 0;
+    }
+}
+```
+
+`CFG_PROMPT`是什么？其实是在100ask24x0.h配置文件中定义的
+
+```c
+#define	CFG_PROMPT		"OpenJTAG> "	/* Monitor Command Prompt	*/
+```
+
+### bootcmd如何读取启动内核？
+
+之前讲过下面的代码，从环境变量中读取bootcmd的值，然后执行`run_command`
+
+```c
+s = getenv ("bootcmd");
+printf("Booting Linux ...\n");            
+run_command (s, 0);
+```
+
+这个过程具体做了些什么？
+
+首先`bootcmd`命令的值是什么？可以看到，`bootcmd`命令值就是`nand read.jffs2 0x30007FC0 kernel; bootm 0x30007FC0`
+
+这条命令什么意思？
+
++ 怎么读 : nand read.jffs2
++ 读到哪里 : 0x30007FC0
++ 从哪里读 : 从`kernel`读。`kernel`是什么？是一个分区
++ 怎么启动 : `bootm 0x30007FC0`
+
+说白了就是，从nand的`nernel`分区读到`0x30007FC0`地址，然后从`0x30007FC0`地址启动
+
+```c
+#define CONFIG_BOOTCOMMAND	"nand read.jffs2 0x30007FC0 kernel; bootm 0x30007FC0"
+
+#ifdef	CONFIG_BOOTCOMMAND
+	"bootcmd="	CONFIG_BOOTCOMMAND		"\0"
+#endif
+```
