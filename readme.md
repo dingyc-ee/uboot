@@ -9,3 +9,5 @@
 [第4章 uboot源码分析第2阶段](004_uboot源码分析第2阶段/readme.md)
 
 [第5章 uboot命令实现](005_uboot命令实现/readme.md)
+
+[第6章 uboo启动内核](006_uboot启动内核/readme.md)
