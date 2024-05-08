@@ -427,6 +427,88 @@ theKernel = (void (*)(int, int, uint))ntohl(hdr->ih_ep);
 
 2. 设置启动参数
 
+uboot通过TAG给内核设置参数。TAG的格式如下。包括头部和tag内容（联合体）。
+
+```c
+#define ATAG_CORE	0x54410001
+#define ATAG_MEM	0x54410002
+#define ATAG_CMDLINE	0x54410009
+
+struct tag_header {
+	u32 size;
+	u32 tag;
+};
+
+struct tag {
+	struct tag_header hdr;
+	union {
+		struct tag_core		core;
+		struct tag_mem32	mem;
+		struct tag_videotext	videotext;
+		struct tag_ramdisk	ramdisk;
+		struct tag_initrd	initrd;
+		struct tag_serialnr	serialnr;
+		struct tag_revision	revision;
+		struct tag_videolfb	videolfb;
+		struct tag_cmdline	cmdline;
+
+		/*
+		 * Acorn specific
+		 */
+		struct tag_acorn	acorn;
+
+		/*
+		 * DC21285 specific
+		 */
+		struct tag_memclk	memclk;
+	} u;
+};
+```
+
+如果我们要设置多个参数，就设置多个TAG就好了。TAG保存在哪里？其实是在`100ask24x0_config.h`中配置的，固定为`0x30000100`。
+
+```c
+int board_init (void)
+{
+    /* support both of S3C2410 and S3C2440, by www.100ask.net */
+    if (isS3C2410)
+    {
+        /* arch number of SMDK2410-Board */
+        gd->bd->bi_arch_number = MACH_TYPE_SMDK2410;
+    }
+    else
+    {
+        /* arch number of SMDK2440-Board */
+        gd->bd->bi_arch_number = MACH_TYPE_S3C2440;
+    }
+
+    /* adress of boot parameters */
+    gd->bd->bi_boot_params = 0x30000100;
+#if 0
+    icache_enable();
+    dcache_enable();
+#endif
+    return 0;
+}
+
+// 设置TAG的起始处
+static void setup_start_tag (bd_t *bd)
+{
+	params = (struct tag *) bd->bi_boot_params;
+
+	params->hdr.tag = ATAG_CORE;
+	params->hdr.size = tag_size (tag_core);
+
+	params->u.core.flags = 0;
+	params->u.core.pagesize = 0;
+	params->u.core.rootdev = 0;
+
+	params = tag_next (params);
+}
+```
+
+下面是设置所需TAG的代码：
+
 ```c
 #if defined (CONFIG_SETUP_MEMORY_TAGS) || \
     defined (CONFIG_CMDLINE_TAG) || \
@@ -459,9 +541,25 @@ theKernel = (void (*)(int, int, uint))ntohl(hdr->ih_ep);
 #endif
 ```
 
+注意，这里还通过环境变量`bootargs`设置了command_line的TAG，内容如下：
+
++ 定义了根文件系统的位置：位于第4个Flash分区
++ 第一个应用程序：linuxrc
++ 内核的打印信息，从串口0打印出来
+
+```c
+#define CONFIG_BOOTARGS    	"noinitrd root=/dev/mtdblock3 init=/linuxrc console=ttySAC0,115200"
+```
+
+对应的内存分布：
+
+![设置参数](pic/004.jpg)
+
 3. 启动内核
 
 先关中断，然后直接跳转到入口地址处去执行
+
+我们传了3个参数。其中重要的是机器ID，在`board_init`函数中设置为`MACH_TYPE_S3C2440 = 362`
 
 ```c
 	/* we assume that the kernel is in place */
